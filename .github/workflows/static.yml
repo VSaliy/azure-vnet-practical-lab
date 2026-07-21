@@ -1,0 +1,65 @@
+name: static
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  credential-free:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Terraform format
+        run: terraform fmt -recursive -check
+      - name: Repository policy, security, and documentation checks
+        run: python -m unittest discover -s tests/static -p 'test_*.py'
+      - name: Terraform mock-provider tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in infrastructure/terraform/stages/* infrastructure/terraform/modules/*; do
+            test -d "$suite/tests" || continue
+            terraform -chdir="$suite" init -backend=false -input=false
+            terraform -chdir="$suite" validate
+            terraform -chdir="$suite" test
+          done
+      - name: Bash syntax
+        run: |
+          for script in scripts/bash/*.sh; do bash -n "$script"; done
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem scripts/powershell -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count) {
+              $errors | ForEach-Object { Write-Error "$($_.Extent.File): $($_.Message)" }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Reject generated or sensitive artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -type f \( -name '*.tfstate*' -o -name '*.tfplan' -o -name '*.pem' -o -name '*.pfx' \) | grep .; then
+            echo "Generated/sensitive artifact found" >&2
+            exit 1
+          fi
+          if find . -type f -name '*.tfvars.json' ! -name '*.tfvars.example.json' | grep .; then
+            echo "Generated/sensitive artifact found" >&2
+            exit 1
+          fi

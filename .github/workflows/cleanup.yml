@@ -1,0 +1,55 @@
+name: manual emergency cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DELETE-VNET-LAB
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-vnet-lab-integration
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    environment: azure-lab-approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm
+        env:
+          CONFIRM_INPUT: ${{ inputs.confirm }}
+        run: test "$CONFIRM_INPUT" = 'DELETE-VNET-LAB'
+      - uses: actions/checkout@v4
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Delete only known lab resource groups
+        shell: pwsh
+        run: ./scripts/powershell/Remove-LabResources.ps1 -Confirmation DELETE-VNET-LAB -Confirm:$false
+      - name: Wait for asynchronous group deletion
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $groups = @(
+            (1..8 | ForEach-Object { 'vnetlab-{0:d2}-rg' -f $_ })
+            'vnetlab-01-bicep-rg'
+            'vnetlab-01-cli-rg'
+          )
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            $remaining = @($groups | Where-Object { (az group exists --name $_ -o tsv) -eq 'true' })
+            if (-not $remaining.Count) { exit 0 }
+            Start-Sleep -Seconds 20
+          }
+          throw "Timed out waiting for resource groups; run residual inventory."
+      - name: Prove no residual
+        shell: pwsh
+        run: ./scripts/powershell/Test-ResidualResources.ps1

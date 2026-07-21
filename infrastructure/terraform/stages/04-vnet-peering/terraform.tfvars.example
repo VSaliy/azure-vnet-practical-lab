@@ -1,0 +1,5 @@
+location           = "westeurope"
+owner              = "learner"
+account_mode       = "no-credit"
+enable_live        = false
+cost_gate_approved = false

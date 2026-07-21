@@ -1,0 +1,6 @@
+location           = "westeurope"
+owner              = "learner"
+account_mode       = "no-credit"
+enable_live        = false
+cost_gate_approved = false
+# admin_ssh_public_key = "ssh-ed25519 <ephemeral-public-key>"

@@ -1,0 +1,38 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+infrastructure/terraform/modules/**/.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.example.json
+
+# Credentials and keys
+.env
+.env.*
+*.pem
+*.pfx
+*.key
+id_rsa*
+id_ed25519*
+
+# Tool output
+.lab/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+coverage/
+test-results/
+*.log

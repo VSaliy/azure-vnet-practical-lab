@@ -1,0 +1,159 @@
+name: manual Azure integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Short-lived stage to apply, test where supported, and destroy
+        required: true
+        type: choice
+        options: ['01', '02', '03', '04', '05', '06', '07', '08']
+      owner:
+        description: Non-sensitive learner or CI alias used in mandatory tags
+        required: true
+        type: string
+      account_mode:
+        description: Must match the verified Stage 00 decision
+        required: true
+        type: choice
+        options: [active-credit, free-services, payg]
+      stage_estimate_usd:
+        description: Verified current USD-equivalent estimate for this stage
+        required: true
+        type: string
+      cumulative_estimate_usd:
+        description: Verified cumulative USD-equivalent estimate including this stage
+        required: true
+        type: string
+      price_verified:
+        description: Current local-currency prices were verified
+        required: true
+        type: boolean
+        default: false
+      quota_verified:
+        description: Regional SKU and quota were verified
+        required: true
+        type: boolean
+        default: false
+      allocation_verified:
+        description: Remaining free allocation verified (required for free-services)
+        required: true
+        type: boolean
+        default: false
+      confirm:
+        description: Type APPLY-TEST-DESTROY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-vnet-lab-integration
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    environment: azure-lab-approval
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_storage_account_name: vnetlab06${{ github.run_id }}
+      LAB_STAGE: ${{ inputs.stage }}
+      LAB_OWNER: ${{ inputs.owner }}
+      ACCOUNT_MODE: ${{ inputs.account_mode }}
+      TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+      TFSTATE_CONTAINER: ${{ vars.AZURE_TFSTATE_CONTAINER }}
+    steps:
+      - name: Confirm bounded lifecycle
+        shell: bash
+        env:
+          CONFIRM_INPUT: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM_INPUT" = 'APPLY-TEST-DESTROY'
+          [[ "$LAB_OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{1,30}$ ]]
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Enforce cost gate
+        shell: pwsh
+        env:
+          STAGE_ESTIMATE_USD: ${{ inputs.stage_estimate_usd }}
+          CUMULATIVE_ESTIMATE_USD: ${{ inputs.cumulative_estimate_usd }}
+          PRICE_VERIFIED: ${{ inputs.price_verified }}
+          QUOTA_VERIFIED: ${{ inputs.quota_verified }}
+          ALLOCATION_VERIFIED: ${{ inputs.allocation_verified }}
+        run: |
+          $gate = @{
+            Stage = $env:LAB_STAGE
+            AccountMode = $env:ACCOUNT_MODE
+            StageEstimateUsd = [double]$env:STAGE_ESTIMATE_USD
+            CumulativeEstimateUsd = [double]$env:CUMULATIVE_ESTIMATE_USD
+            PriceVerified = [bool]::Parse($env:PRICE_VERIFIED)
+            QuotaVerified = [bool]::Parse($env:QUOTA_VERIFIED)
+            AllocationVerified = [bool]::Parse($env:ALLOCATION_VERIFIED)
+            Approved = $true
+          }
+          ./scripts/powershell/Test-CostGate.ps1 @gate
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Create runner-only SSH key
+        run: ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/lab_key"
+      - name: Locate stage and initialize
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage_dir="$(find infrastructure/terraform/stages -maxdepth 1 -type d -name "$LAB_STAGE-*" | head -n1)"
+          test -n "$stage_dir"
+          test -n "$TFSTATE_RESOURCE_GROUP"
+          test -n "$TFSTATE_STORAGE_ACCOUNT"
+          test -n "$TFSTATE_CONTAINER"
+          cat > "$stage_dir/ci-backend.tf" <<'EOF'
+          terraform {
+            backend "azurerm" {}
+          }
+          EOF
+          echo "STAGE_DIR=$stage_dir" >> "$GITHUB_ENV"
+          terraform -chdir="$stage_dir" init -input=false -reconfigure \
+            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TFSTATE_CONTAINER" \
+            -backend-config="key=vnet-lab/$LAB_STAGE.tfstate" \
+            -backend-config='use_azuread_auth=true'
+      - name: Apply short-lived stage
+        shell: bash
+        run: |
+          public_key="$(cat "$RUNNER_TEMP/lab_key.pub")"
+          terraform -chdir="$STAGE_DIR" apply -auto-approve -input=false \
+            -var="account_mode=$ACCOUNT_MODE" \
+            -var='cost_gate_approved=true' \
+            -var='enable_live=true' \
+            -var="owner=$LAB_OWNER" \
+            -var="admin_ssh_public_key=$public_key"
+      - name: Stage 02 acceptance matrix
+        if: inputs.stage == '02'
+        shell: pwsh
+        run: ./scripts/powershell/Test-Stage02Connectivity.ps1
+      - name: Always destroy
+        if: always()
+        shell: bash
+        run: |
+          test -n "${STAGE_DIR:-}" || exit 0
+          public_key="$(cat "$RUNNER_TEMP/lab_key.pub" 2>/dev/null || printf 'ssh-ed25519 unavailable')"
+          terraform -chdir="$STAGE_DIR" destroy -auto-approve -input=false \
+            -var="account_mode=$ACCOUNT_MODE" \
+            -var='cost_gate_approved=true' \
+            -var='enable_live=true' \
+            -var="owner=$LAB_OWNER" \
+            -var="admin_ssh_public_key=$public_key"
+      - name: Residual assertion
+        if: always()
+        shell: pwsh
+        run: ./scripts/powershell/Test-ResidualResources.ps1

@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/01-minimal-vnet
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/02-three-tier-segmentation
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/03-routing-and-nsg-diagnostics
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/04-vnet-peering
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/05-hub-and-spoke
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/06-private-service-access
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/07-monitoring
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/terraform/stages/08-troubleshooting
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

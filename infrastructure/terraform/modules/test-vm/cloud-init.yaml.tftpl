@@ -1,0 +1,18 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+write_files:
+  - path: /usr/local/bin/lab-listener.py
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      import socketserver, sys
+      class Handler(socketserver.BaseRequestHandler):
+          def handle(self):
+              self.request.sendall(("LISTENER_OK port=" + sys.argv[1] + "\n").encode())
+      socketserver.ThreadingTCPServer.allow_reuse_address = True
+      with socketserver.ThreadingTCPServer(("0.0.0.0", int(sys.argv[1])), Handler) as server:
+          server.serve_forever()
+runcmd:
+  - [sh, -c, 'for port in ${ports}; do nohup python3 /usr/local/bin/lab-listener.py "$port" >"/var/log/lab-listener-$port.log" 2>&1 & done']
+final_message: "LAB_CLOUD_INIT_COMPLETE"
