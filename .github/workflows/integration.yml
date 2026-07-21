@@ -75,7 +75,7 @@ jobs:
           test "$CONFIRM_INPUT" = 'APPLY-TEST-DESTROY'
           [[ "$LAB_OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{1,30}$ ]]
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.8
       - name: Enforce cost gate
